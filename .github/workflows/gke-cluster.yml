@@ -29,14 +29,16 @@ jobs:
       - name: Create GKE cluster
         run: |
           gcloud container clusters create ${{ github.event.inputs.clusterName }} \
-            --project=ams-practicesharedservicesops \
-            --region=${{ github.event.inputs.location }} \
-            --machine-type=e2-small \
-            --num-nodes=1 \
-            --enable-ip-alias \
-            --release-channel=regular \
-            --workload-pool=--workload-pool=${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
-            --enable-autoupgrade \
-            --enable-autorepair \
-            --enable-shielded-nodes \
-            --enable-network-policy
+          --project=${{ secrets.GCP_PROJECT_ID }} \
+          --region=${{ github.event.inputs.location }} \
+          --machine-type=e2-small \
+          --num-nodes=1 \
+          --enable-ip-alias \
+          --network=backstage-vpc \
+          --release-channel=regular \
+          --workload-pool=${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
+          --enable-autoupgrade \
+          --enable-autorepair \
+          --enable-shielded-nodes \
+          --enable-network-policy
+
