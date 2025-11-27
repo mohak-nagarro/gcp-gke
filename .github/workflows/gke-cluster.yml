@@ -35,6 +35,7 @@ jobs:
           --num-nodes=1 \
           --enable-ip-alias \
           --network=backstage-vpc \
+          --subnetwork=asia-south1 \
           --release-channel=regular \
           --workload-pool=${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
           --enable-autoupgrade \
