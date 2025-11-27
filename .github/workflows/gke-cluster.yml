@@ -20,6 +20,14 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           service_account_key: ${{ secrets.GCP_SA_KEY }}
 
+      - name: Login
+        run: |
+          gcloud auth login
+
+      - name: Set account
+        run: |
+          gcloud config set account ${{ secrets.GCP_PROJECT_ID }}
+
       - name: Enable APIs
         run: |
           gcloud services enable \
