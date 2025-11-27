@@ -15,17 +15,19 @@ jobs:
   create-gke:
     runs-on: ubuntu-latest
     steps:
-      - uses: google-github-actions/setup-gcloud@v2
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v2'
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v3'
+
+      - name: 'Use gcloud CLI'
+        run: 'gcloud info'
 
       - name: Create GKE cluster
         run: |
-          gcloud config set account ${{ secrets.GCP_PROJECT_ID }}
-          gcloud auth activate-service-account backstage-sa@ams-practicesharedservicesops.iam.gserviceaccount.com --key=${{ secrets.GCP_SA_KEY }}
-
           gcloud container clusters create ${{ github.event.inputs.clusterName }} \
             --project=ams-practicesharedservicesops \
             --region=${{ github.event.inputs.location }} \
