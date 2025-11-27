@@ -24,6 +24,7 @@ jobs:
       - name: Create GKE cluster
         run: |
           gcloud config set account ${{ secrets.GCP_PROJECT_ID }}
+          gcloud auth activate-service-account backstage-sa@ams-practicesharedservicesops.iam.gserviceaccount.com
 
           gcloud container clusters create ${{ github.event.inputs.clusterName }} \
             --project=ams-practicesharedservicesops \
