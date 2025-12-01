@@ -1,0 +1,169 @@
+name: Create GKE Cluster and Deploy App
+
+on:
+  workflow_dispatch:
+    inputs:
+      clusterName:
+        description: 'Name of the GKE cluster'  
+        required: true  
+      location:
+        description: 'GKE Region for the cluster'
+        required: true
+      appName:
+        description: 'Name of the application to deploy'
+        required: true
+      appPort:
+        description: 'Container port of the application'
+        required: true
+        type: number
+      repoUrl:
+        description: 'Repository URL for image tagging'
+        required: true
+      # --- NEW CLUSTER SPECIFICATION PARAMETERS ---
+      machineType:
+        description: 'GKE Node Machine Type (e.g., e2-small, e2-medium)'
+        required: false
+        default: 'e2-small'
+      nodeCount:
+        description: 'Initial number of nodes in the cluster'
+        required: false
+        type: number
+        default: 1
+      gkeNetwork:
+        description: 'VPC Network for the cluster'
+        required: false
+        default: 'backstage-vpc'
+      gkeSubnetwork:
+        description: 'Subnetwork for the cluster'
+        required: false
+        default: 'asia-south1'
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER: ${{ github.event.inputs.clusterName }}
+  GKE_ZONE: ${{ github.event.inputs.location }}
+  APP_NAME: ${{ github.event.inputs.appName }}
+  APP_PORT: ${{ github.event.inputs.appPort }}
+  # Define the image name for the container registry (e.g., GCR or Artifact Registry)
+  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.event.inputs.appName }}:${{ github.sha }}
+  
+  # --- NEW ENVIRONMENT VARIABLES FROM INPUTS ---
+  GKE_MACHINE_TYPE: ${{ github.event.inputs.machineType }}
+  GKE_NODE_COUNT: ${{ github.event.inputs.nodeCount }}
+  GKE_NETWORK: ${{ github.event.inputs.gkeNetwork }}
+  GKE_SUBNETWORK: ${{ github.event.inputs.gkeSubnetwork }}
+
+jobs:
+  create-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Authenticate to GCP
+      - id: 'auth'
+        name: 'Authenticate to GCP'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+          
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v3'
+
+      - name: 'Use gcloud CLI'
+        run: 'gcloud info'
+
+      # 2. Create GKE Cluster
+      - name: Create GKE cluster
+        id: create-cluster
+        run: |
+          echo "Creating cluster $GKE_CLUSTER in $GKE_ZONE with machine type $GKE_MACHINE_TYPE and $GKE_NODE_COUNT nodes..."
+          gcloud container clusters create $GKE_CLUSTER \
+            --project=$PROJECT_ID \
+            --region=$GKE_ZONE \
+            --machine-type=$GKE_MACHINE_TYPE \
+            --num-nodes=$GKE_NODE_COUNT \
+            --enable-ip-alias \
+            --network=$GKE_NETWORK \
+            --subnetwork=$GKE_SUBNETWORK \
+            --release-channel=regular \
+            --workload-pool=$PROJECT_ID.svc.id.goog \
+            --enable-autoupgrade \
+            --enable-autorepair \
+            --enable-shielded-nodes \
+            --enable-network-policy
+          echo "GKE cluster creation initiated."
+      
+      # 3. Checkout the Application Code (Crucial for Docker build)
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        # NOTE: If the Backstage template publishes to a *different* repo than where this workflow lives, 
+        # you need a separate checkout step targeting the newly created repo/code base. 
+        # For simplicity, we assume the content is now available locally.
+        
+      # 4. Build and Push Docker Image
+      - name: Build and Push Docker Image
+        run: |
+          gcloud auth configure-docker --quiet
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+          
+      # 5. Get Cluster Credentials
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_ZONE }}
+          project_id: ${{ env.PROJECT_ID }}
+          
+      # 6. Deploy Application to GKE (Deployment and Service)
+      - name: Deploy Node.js App
+        run: |
+          # Create a basic Kubernetes Deployment YAML dynamically
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: ${{ env.APP_NAME }}-deployment
+            labels:
+              app: ${{ env.APP_NAME }}
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: ${{ env.APP_NAME }}
+            template:
+              metadata:
+                labels:
+                  app: ${{ env.APP_NAME }}
+              spec:
+                containers:
+                - name: ${{ env.APP_NAME }}-container
+                  image: ${{ env.IMAGE_NAME }}
+                  ports:
+                  - containerPort: ${{ env.APP_PORT }}
+                  # Adding a readiness probe to ensure the app is healthy
+                  readinessProbe:
+                    httpGet:
+                      path: /
+                      port: ${{ env.APP_PORT }}
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+          EOF
+          
+          # Create a basic Kubernetes Service YAML dynamically (using LoadBalancer for external access)
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: ${{ env.APP_NAME }}-service
+            labels:
+              app: ${{ env.APP_NAME }}
+          spec:
+            type: LoadBalancer
+            ports:
+            - port: 80
+              targetPort: ${{ env.APP_PORT }}
+              protocol: TCP
+            selector:
+              app: ${{ env.APP_NAME }}
+          EOF
+          
+          echo "Deployment and Service for ${{ env.APP_NAME }} submitted to the cluster."
