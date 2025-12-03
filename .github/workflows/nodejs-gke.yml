@@ -39,7 +39,8 @@ env:
   GKE_LOCATION: ${{ github.event.inputs.location }}
   APP_NAME: ${{ github.event.inputs.appName }}
   # default artifact registry repo name (change if needed)
-  ARTIFACT_REPO: nodeapps
+  ARTIFACT_REPO: asia-south1-docker.pkg.dev/ams-practicesharedservicesops/nodeapps
+  IMAGE: node-js
 
 jobs:
   create-and-deploy:
@@ -124,7 +125,7 @@ jobs:
           echo "Building image: $FULL_IMAGE"
           docker build -t "$FULL_IMAGE" .
           gcloud auth configure-docker asia-south1-docker.pkg.dev
-          docker push "$FULL_IMAGE"
+          docker push ARTIFACT_REPO/${IMAGE}:latest
 
           echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
           echo "PUSHED_IMAGE=$FULL_IMAGE"
