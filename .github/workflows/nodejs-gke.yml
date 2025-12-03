@@ -119,7 +119,7 @@ jobs:
           REPO=${{ env.ARTIFACT_REPO }}
           IMAGE=${{ github.event.inputs.appName }}
           TAG=${{ github.sha }}
-          FULL_IMAGE="asia-south1-docker.pkg.dev/$PROJECT/$REPO/$IMAGE:$TAG"
+          FULL_IMAGE="asia-south1-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:$TAG"
 
           echo "Building image: $FULL_IMAGE"
           docker build -t "$FULL_IMAGE" .
