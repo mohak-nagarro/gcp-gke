@@ -12,10 +12,6 @@ on:
       appName:
         description: 'Name of the application to deploy'
         required: true
-      appPort:
-        description: 'Container port of the application'
-        required: true
-        type: number
       repoUrl:
         description: 'Repository URL for image tagging'
         required: true
@@ -43,7 +39,6 @@ env:
   GKE_CLUSTER: ${{ github.event.inputs.clusterName }}
   GKE_ZONE: ${{ github.event.inputs.location }}
   APP_NAME: ${{ github.event.inputs.appName }}
-  APP_PORT: ${{ github.event.inputs.appPort }}
   # Define the image name for the container registry (e.g., GCR or Artifact Registry)
   IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.event.inputs.appName }}:${{ github.sha }}
   
@@ -97,13 +92,24 @@ jobs:
         # NOTE: If the Backstage template publishes to a *different* repo than where this workflow lives, 
         # you need a separate checkout step targeting the newly created repo/code base. 
         # For simplicity, we assume the content is now available locally.
-        
-      # 4. Build and Push Docker Image
-      - name: Build and Push Docker Image
+
+      - name: Configure Docker Artifact Registry
         run: |
-          gcloud auth configure-docker --quiet
-          docker build -t $IMAGE_NAME .
-          docker push $IMAGE_NAME
+          gcloud auth configure-docker asia-south1-docker.pkg.dev
+        
+      - name: Build & Push Image to Artifact Registry
+        run: |
+          PROJECT=${{ secrets.GCP_PROJECT_ID }}
+          REPO=nodeapps
+          IMAGE=${{ github.event.inputs.appName }}
+          TAG=${{ github.sha }}
+          FULL_IMAGE="asia-south1-docker.pkg.dev/$PROJECT/$REPO/$IMAGE:$TAG"
+          echo "Building image: $FULL_IMAGE"
+          
+          docker build -t "$FULL_IMAGE" .
+          docker push "$FULL_IMAGE"
+          
+          echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
           
       # 5. Get Cluster Credentials
       - name: Get GKE credentials
@@ -113,56 +119,11 @@ jobs:
           location: ${{ env.GKE_ZONE }}
           project_id: ${{ env.PROJECT_ID }}
           
-      # 6. Deploy Application to GKE (Deployment and Service)
-      - name: Deploy Node.js App
+      - name: Apply Kubernetes manifests
         run: |
-          # Create a basic Kubernetes Deployment YAML dynamically
-          cat <<EOF | kubectl apply -f -
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: ${{ env.APP_NAME }}-deployment
-            labels:
-              app: ${{ env.APP_NAME }}
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: ${{ env.APP_NAME }}
-            template:
-              metadata:
-                labels:
-                  app: ${{ env.APP_NAME }}
-              spec:
-                containers:
-                - name: ${{ env.APP_NAME }}-container
-                  image: ${{ env.IMAGE_NAME }}
-                  ports:
-                  - containerPort: ${{ env.APP_PORT }}
-                  # Adding a readiness probe to ensure the app is healthy
-                  readinessProbe:
-                    httpGet:
-                      path: /
-                      port: ${{ env.APP_PORT }}
-                    initialDelaySeconds: 5
-                    periodSeconds: 5
-          EOF
-          
-          # Create a basic Kubernetes Service YAML dynamically (using LoadBalancer for external access)
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: ${{ env.APP_NAME }}-service
-            labels:
-              app: ${{ env.APP_NAME }}
-          spec:
-            type: LoadBalancer
-            ports:
-            - port: 80
-              targetPort: ${{ env.APP_PORT }}
-              protocol: TCP
-            selector:
+          sed -i "s|IMAGE_PLACEHOLDER|$FULL_IMAGE|g" k8s/deployment.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
               app: ${{ env.APP_NAME }}
           EOF
           
