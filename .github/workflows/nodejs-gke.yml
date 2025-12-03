@@ -156,7 +156,8 @@ jobs:
           # Replace the placeholder in the deployment file (expecting k8s/deployment.yaml)
           sed -i "s|IMAGE_PLACEHOLDER|${FULL_IMAGE}|g" deployment.yaml
 
-          kubectl apply -f 
+          kubectl apply -f deployment.yaml
+          kubectl apply -f service.yaml
 
           echo "Deployment and Service for ${APP_NAME} applied."
 
