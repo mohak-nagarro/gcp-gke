@@ -123,7 +123,7 @@ jobs:
           FULL_IMAGE="asia-south1-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:$TAG"
 
           echo "Building image: $FULL_IMAGE"
-          docker build -t "$FULL_IMAGE" .
+          docker build -t ${ARTIFACT_REPO}/${IMAGE}:latest .
           gcloud auth configure-docker asia-south1-docker.pkg.dev
           docker push ${ARTIFACT_REPO}/${IMAGE}:latest
 
