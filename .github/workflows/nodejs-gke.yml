@@ -120,14 +120,14 @@ jobs:
           REPO=${{ env.ARTIFACT_REPO }}
           IMAGE=${{ github.event.inputs.appName }}
           TAG=${{ github.sha }}
-          FULL_IMAGE="asia-south1-docker.pkg.dev/$PROJECT_ID/$REPO/$IMAGE:$TAG"
+          FULL_IMAGE="asia-south1-docker.pkg.dev/ams-practicesharedservicesops/nodeapps/$IMAGE:latest"
 
           echo "Building image: $FULL_IMAGE"
-          docker build -t ${ARTIFACT_REPO}/${IMAGE}:latest .
+          docker build -t $FULL_IMAGE .
           gcloud auth configure-docker asia-south1-docker.pkg.dev
+          gcloud auth list
           docker images
-          docker push ${ARTIFACT_REPO}/${IMAGE}:latest
-
+          docker push $FULL_IMAGE
           echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
           echo "PUSHED_IMAGE=$FULL_IMAGE"
 
