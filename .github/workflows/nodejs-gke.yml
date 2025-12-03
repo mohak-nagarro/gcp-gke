@@ -12,9 +12,9 @@ on:
       appName:
         description: 'Name of the application to deploy'
         required: true
-      repoUrl:
-        description: 'Repository URL where the code and manifests live (for traceability)'
-        required: true
+      #repoUrl:
+      #  description: 'Repository URL where the code and manifests live (for traceability)'
+      #  required: true
       machineType:
         description: 'GKE Node Machine Type (e.g., e2-small, e2-medium)'
         required: false
