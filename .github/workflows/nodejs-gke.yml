@@ -125,7 +125,7 @@ jobs:
           echo "Building image: $FULL_IMAGE"
           docker build -t "$FULL_IMAGE" .
           gcloud auth configure-docker asia-south1-docker.pkg.dev
-          docker push ARTIFACT_REPO/${IMAGE}:latest
+          docker push ${ARTIFACT_REPO}/${IMAGE}:latest
 
           echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
           echo "PUSHED_IMAGE=$FULL_IMAGE"
