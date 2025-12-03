@@ -4,18 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       clusterName:
-        description: 'Name of the GKE cluster'  
-        required: true  
+        description: 'Name of the GKE cluster'
+        required: true
       location:
-        description: 'GKE Region for the cluster'
+        description: 'GKE Zone or Region for the cluster (e.g., asia-south1-a or asia-south1)'
         required: true
       appName:
         description: 'Name of the application to deploy'
         required: true
       repoUrl:
-        description: 'Repository URL for image tagging'
+        description: 'Repository URL where the code and manifests live (for traceability)'
         required: true
-      # --- NEW CLUSTER SPECIFICATION PARAMETERS ---
       machineType:
         description: 'GKE Node Machine Type (e.g., e2-small, e2-medium)'
         required: false
@@ -37,94 +36,122 @@ on:
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GKE_CLUSTER: ${{ github.event.inputs.clusterName }}
-  GKE_ZONE: ${{ github.event.inputs.location }}
+  GKE_LOCATION: ${{ github.event.inputs.location }}
   APP_NAME: ${{ github.event.inputs.appName }}
-  # Define the image name for the container registry (e.g., GCR or Artifact Registry)
-  IMAGE_NAME: gcr.io/${{ secrets.GCP_PROJECT_ID }}/${{ github.event.inputs.appName }}:${{ github.sha }}
-  
-  # --- NEW ENVIRONMENT VARIABLES FROM INPUTS ---
-  GKE_MACHINE_TYPE: ${{ github.event.inputs.machineType }}
-  GKE_NODE_COUNT: ${{ github.event.inputs.nodeCount }}
-  GKE_NETWORK: ${{ github.event.inputs.gkeNetwork }}
-  GKE_SUBNETWORK: ${{ github.event.inputs.gkeSubnetwork }}
+  # default artifact registry repo name (change if needed)
+  ARTIFACT_REPO: nodeapps
 
 jobs:
   create-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      # 1. Authenticate to GCP
-      - id: 'auth'
-        name: 'Authenticate to GCP'
-        uses: 'google-github-actions/auth@v2'
+      - id: auth
+        name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
         with:
           credentials_json: '${{ secrets.GCP_SA_KEY }}'
-          
-      - name: 'Set up Cloud SDK'
-        uses: 'google-github-actions/setup-gcloud@v3'
 
-      - name: 'Use gcloud CLI'
-        run: 'gcloud info'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
 
-      # 2. Create GKE Cluster
+      - name: Use gcloud CLI
+        run: gcloud info
+
+      - name: Decide zone vs region
+        id: loc
+        run: |
+          # Determine whether user provided a zone (asia-south1-a) or a region (asia-south1)
+          LOC="${{ env.GKE_LOCATION }}"
+          if [[ "$LOC" =~ ^[a-z]+-[0-9]+-[a-z]$ ]]; then
+            echo "location_type=zone" >> $GITHUB_OUTPUT
+            echo "location_arg=--zone=${LOC}" >> $GITHUB_OUTPUT
+          else
+            echo "location_type=region" >> $GITHUB_OUTPUT
+            echo "location_arg=--region=${LOC}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create GKE cluster
         id: create-cluster
         run: |
-          echo "Creating cluster $GKE_CLUSTER in $GKE_ZONE with machine type $GKE_MACHINE_TYPE and $GKE_NODE_COUNT nodes..."
-          gcloud container clusters create $GKE_CLUSTER \
-            --project=$PROJECT_ID \
-            --region=$GKE_ZONE \
-            --machine-type=$GKE_MACHINE_TYPE \
-            --num-nodes=$GKE_NODE_COUNT \
+          echo "Creating cluster ${GKE_CLUSTER} in ${GKE_LOCATION}..."
+          # Use computed location argument
+          gcloud container clusters create "${GKE_CLUSTER}" \
+            --project="${PROJECT_ID}" \
+            ${{ steps.loc.outputs.location_arg }} \
+            --machine-type="${{ github.event.inputs.machineType }}" \
+            --num-nodes="${{ github.event.inputs.nodeCount }}" \
             --enable-ip-alias \
-            --network=$GKE_NETWORK \
-            --subnetwork=$GKE_SUBNETWORK \
+            --network="${{ github.event.inputs.gkeNetwork }}" \
+            --subnetwork="${{ github.event.inputs.gkeSubnetwork }}" \
             --release-channel=regular \
-            --workload-pool=$PROJECT_ID.svc.id.goog \
+            --workload-pool="${PROJECT_ID}.svc.id.goog" \
             --enable-autoupgrade \
             --enable-autorepair \
             --enable-shielded-nodes \
-            --enable-network-policy
-          echo "GKE cluster creation initiated."
-      
-      # 3. Checkout the Application Code (Crucial for Docker build)
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        # NOTE: If the Backstage template publishes to a *different* repo than where this workflow lives, 
-        # you need a separate checkout step targeting the newly created repo/code base. 
-        # For simplicity, we assume the content is now available locally.
+            --enable-network-policy || true
+          echo "Cluster creation command executed (may be long-running)."
 
-      - name: Configure Docker Artifact Registry
+      - name: Checkout repository (app code & k8s manifests)
+        uses: actions/checkout@v4
+        # The workflow will be running inside the repo created by Backstage
+        # so the default checkout gets the repo containing Dockerfile + k8s/ already
+
+      - name: Configure Docker for Artifact Registry
         run: |
-          gcloud auth configure-docker asia-south1-docker.pkg.dev
-        
+          gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
+
+      #- name: Ensure Artifact Registry repo exists
+      #  run: |
+      #    PROJECT={{ secrets.GCP_PROJECT_ID }}
+      #    LOCATION=asia-south1
+      #    REPO={{ env.ARTIFACT_REPO }}
+      #    if ! gcloud artifacts repositories list --project="$PROJECT" --location="$LOCATION" --format="value(name)" | grep -q "^$REPO$"; then
+      #      echo "Creating Artifact Registry repo: $REPO"
+      #      gcloud artifacts repositories create "$REPO" --repository-format=docker --location="$LOCATION" --description="Docker repo for node apps" --project="$PROJECT"
+      #    else
+      #      echo "Artifact Registry repo $REPO already exists."
+      #    fi
+
       - name: Build & Push Image to Artifact Registry
+        id: build-and-push
         run: |
           PROJECT=${{ secrets.GCP_PROJECT_ID }}
-          REPO=nodeapps
+          REPO=${{ env.ARTIFACT_REPO }}
           IMAGE=${{ github.event.inputs.appName }}
           TAG=${{ github.sha }}
           FULL_IMAGE="asia-south1-docker.pkg.dev/$PROJECT/$REPO/$IMAGE:$TAG"
+
           echo "Building image: $FULL_IMAGE"
-          
           docker build -t "$FULL_IMAGE" .
           docker push "$FULL_IMAGE"
-          
+
           echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
-          
-      # 5. Get Cluster Credentials
+          echo "PUSHED_IMAGE=$FULL_IMAGE"
+
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.GKE_CLUSTER }}
-          location: ${{ env.GKE_ZONE }}
+          location: ${{ env.GKE_LOCATION }}
           project_id: ${{ env.PROJECT_ID }}
-          
-      - name: Apply Kubernetes manifests
+
+
+      - name: Replace image placeholder and apply k8s manifests
         run: |
-          sed -i "s|IMAGE_PLACEHOLDER|$FULL_IMAGE|g" k8s/deployment.yaml
-          kubectl apply -f k8s/deployment.yaml
-          kubectl apply -f k8s/service.yaml
-              app: ${{ env.APP_NAME }}
-          EOF
-          
-          echo "Deployment and Service for ${{ env.APP_NAME }} submitted to the cluster."
+          if [ -z "${FULL_IMAGE}" ]; then
+            echo "FULL_IMAGE env var not set — aborting"
+            exit 1
+          fi
+
+          # Replace the placeholder in the deployment file (expecting k8s/deployment.yaml)
+          sed -i "s|IMAGE_PLACEHOLDER|${FULL_IMAGE}|g" k8s/deployment.yaml
+
+          # Apply everything under k8s/
+          kubectl apply -f k8s/
+
+          echo "Deployment and Service for ${APP_NAME} applied."
+
+      - name: Show pods and services
+        run: |
+          kubectl get pods -o wide
+          kubectl get svc -o wide
