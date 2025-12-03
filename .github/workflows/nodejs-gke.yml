@@ -97,6 +97,12 @@ jobs:
         # The workflow will be running inside the repo created by Backstage
         # so the default checkout gets the repo containing Dockerfile + k8s/ already
 
+      - id: auth-gcr
+        name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
@@ -115,6 +121,7 @@ jobs:
 
       - name: Build & Push Image to Artifact Registry
         id: build-and-push
+        
         run: |
           PROJECT=${{ secrets.GCP_PROJECT_ID }}
           REPO=${{ env.ARTIFACT_REPO }}
