@@ -91,6 +91,11 @@ jobs:
             --enable-network-policy || true
           echo "Cluster creation command executed (may be long-running)."
 
+      - name: Checkout repository (app code & k8s manifests)
+        uses: actions/checkout@v4
+        # The workflow will be running inside the repo created by Backstage
+        # so the default checkout gets the repo containing Dockerfile + k8s/ already
+
       - name: Configure Docker for Artifact Registry
         run: |
           gcloud auth configure-docker asia-south1-docker.pkg.dev --quiet
